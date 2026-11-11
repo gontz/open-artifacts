@@ -6,6 +6,7 @@ dist/
 .DS_Store
 .artifacts/credentials.json
 .artifacts/manifest.local.json
+.artifacts/config.local.json
 .artifacts/previews/
 .artifacts/recipes.local/
 .artifacts/fragments.local/
