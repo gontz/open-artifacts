@@ -636,6 +636,28 @@ describe("Recipe builder", () => {
     expect(requests).toHaveLength(0);
   });
 
+  it("insets the frame body by its own padding, never by a child margin", async () => {
+    // A full-bleed frame is an edge-to-edge device screen: it clears the body
+    // padding. While the horizontal inset lived on `.oa-frame-body > *`'s
+    // margin, clearing the padding was only half the contract — a full-width
+    // child kept the 8 world-px side margin and the screen sat inset, leaving
+    // an unpainted strip either side of it. One mechanism: inline padding.
+    const { recipePath } = writeRecipe("flush", { canvas: true });
+    const output = join(projectDir, "flush-preview.html");
+
+    await run(["build", recipePath, "--output", output, "--standalone"]);
+
+    const html = readFileSync(output, "utf8");
+    expect(html).toMatch(
+      /\.oa-frame-body\s*\{[^}]*padding:\s*var\(--space-5\)\s+var\(--space-7\)/,
+    );
+    expect(html).not.toMatch(/\.oa-frame-body\s*>\s*\*\s*\{[^}]*margin-inline/);
+    // The child rule still owns the no-inner-scrollport contract.
+    expect(html).toMatch(
+      /\.oa-frame-body\s*>\s*\*\s*\{[^}]*overflow:\s*visible/,
+    );
+  });
+
   it("refuses to overwrite a Recipe through a preview symlink", async () => {
     const { recipePath } = writeRecipe("preview-alias");
     const alias = join(projectDir, "preview-alias.json");
@@ -3558,6 +3580,61 @@ describe("live watch: heartbeats, 404 hints, prompt delivery", () => {
       files: ["recipe.html"],
       notes: ["applied copy edits"],
     });
+  });
+
+  it("OPEN_ARTIFACTS_LIVE_TRANSPORT=poll skips ticket request and polls HTTP directly", async () => {
+    holdPoll = true;
+    const { child, done } = spawnCli(["live", "testid123456", "--watch"], {
+      ...skEnv,
+      OPEN_ARTIFACTS_LIVE_TRANSPORT: "poll",
+      OPEN_ARTIFACTS_LIVE_HEARTBEAT_MS: "5000",
+    });
+    try {
+      await new Promise((r) => setTimeout(r, 250));
+      releasePoll?.(200, { type: "exit", id: "ev9" });
+      const { stderr } = await done;
+      expect(stderr).toContain("session ended");
+      // Must not have called /live/ticket.
+      const tickets = requests.filter(
+        (r) => r.method === "POST" && r.path.includes("/live/ticket"),
+      );
+      expect(tickets.length).toBe(0);
+      const polls = requests.filter(
+        (r) => r.method === "GET" && r.path.includes("/live/poll"),
+      );
+      expect(polls.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      if (releasePoll) releasePoll(500, { error: "test teardown" });
+      child.kill();
+    }
+  });
+
+  it("watch falls back to HTTP long-poll when ticket request returns 404", async () => {
+    holdPoll = true;
+    nextResponse = { status: 404, body: { error: "not found" } };
+    const { child, done } = spawnCli(["live", "testid123456", "--watch"], {
+      ...skEnv,
+      OPEN_ARTIFACTS_LIVE_HEARTBEAT_MS: "5000",
+    });
+    try {
+      await new Promise((r) => setTimeout(r, 250));
+      // First ticket failed 404, watch fell back to poll and is now waiting on holdPoll.
+      releasePoll?.(200, { type: "exit", id: "ev9" });
+      const { stderr } = await done;
+      expect(stderr).toContain("falling back to poll");
+      expect(stderr).toContain("session ended");
+      const tickets = requests.filter(
+        (r) => r.method === "POST" && r.path.includes("/live/ticket"),
+      );
+      expect(tickets.length).toBe(1);
+      const polls = requests.filter(
+        (r) => r.method === "GET" && r.path.includes("/live/poll"),
+      );
+      expect(polls.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      if (releasePoll) releasePoll(500, { error: "test teardown" });
+      child.kill();
+    }
   });
 
   it("live --reply fails on invalid --data JSON", async () => {

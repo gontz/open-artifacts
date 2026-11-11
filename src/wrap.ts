@@ -213,8 +213,18 @@ img,video,canvas{max-width:100%}
 @media (prefers-color-scheme: dark){:root{--oa-bg:#131316;--oa-fg:#e7e7ea;--oa-muted:#9a9aa2;--oa-border:#2e2e33;--oa-surface:#1c1c21;--oa-accent:#8d82f5;--oa-accent-on:#16151b;--oa-danger:#ff8f85}}
 :root[data-theme="light"]{color-scheme:light;--oa-bg:#ffffff;--oa-fg:#18181b;--oa-muted:#71717a;--oa-border:#e4e4e7;--oa-surface:#f8f8f8;--oa-accent:#6457f0;--oa-accent-on:#ffffff;--oa-danger:#b42318}
 :root[data-theme="dark"]{color-scheme:dark;--oa-bg:#131316;--oa-fg:#e7e7ea;--oa-muted:#9a9aa2;--oa-border:#2e2e33;--oa-surface:#1c1c21;--oa-accent:#8d82f5;--oa-accent-on:#16151b;--oa-danger:#ff8f85}
-:root{--oa-header-h:calc(2.5rem + 1px)}
-[id]{scroll-margin-top:calc(var(--oa-header-h) + .5rem)}
+/* The frame carries no service header: the host page owns it and positions
+   the iframe below it, so the frame viewport already is the visible area.
+   Author CSS that sizes a viewport as calc(100dvh - var(--oa-header-h)) —
+   the vendored canvas kit's own rule, and the documented pattern for a
+   full-height hero — must therefore subtract nothing here. The host's header
+   height used to leak in as this default, which left a header-tall strip
+   with no dot lattice at the bottom of every canvas artifact and pulled
+   full-height author content short by the same amount. */
+:root{--oa-header-h:0px}
+/* Anchor jumps clear the sheet's own top inset instead of a header that is
+   not in this document. */
+[id]{scroll-margin-top:calc(var(--oa-shell-gap, .75rem) + .5rem)}
 `;
 
 const RESET_CSS = `
@@ -1083,9 +1093,6 @@ const HOST_FRAME_CSS = `
 const ACCOUNT_CSS = `
 .oa-account-slot{position:relative;display:inline-flex;align-items:center;flex-shrink:0;min-height:28px}
 .oa-account-slot:empty{display:none}
-.oa-account-loading{width:20px;height:20px;border:2px solid color-mix(in oklab,var(--oa-fg),transparent 85%);border-top-color:var(--oa-accent);border-radius:50%;animation:oa-spin .8s linear infinite}
-@keyframes oa-spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.oa-account-loading{animation:none;opacity:.5}}
 .oa-account-btn{position:relative;display:inline-flex;align-items:center;gap:.4rem;height:28px;padding:0 .35rem 0 .3rem;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--oa-fg);font:inherit;font-size:.75rem;line-height:1;cursor:pointer;transition:color .15s,background .15s}
 .oa-account-btn:focus-visible{outline:none;box-shadow:var(--oa-focus-ring)}
 .oa-account-btn:active{transform:translateY(1px)}
@@ -1117,7 +1124,6 @@ const ACCOUNT_SCRIPT = `
   function initialAvatar(name){var fallback=document.createElement('span');fallback.className='oa-account-av';fallback.setAttribute('aria-hidden','true');fallback.textContent=initial(name);return fallback;}
   function syncOverflow(){if(window.__oaSyncHeaderOverflow)window.__oaSyncHeaderOverflow();}
   function clear(){slot.innerHTML='';syncOverflow();}
-  function showLoading(){slot.innerHTML='<div class="oa-account-loading" role="status" aria-label="Loading account"></div>';syncOverflow();}
   function renderSignin(){slot.innerHTML='<a class="oa-account-signin" href="/login">Sign in</a>';syncOverflow();}
   function renderUser(name,picture){
     var btn=document.createElement('button');btn.type='button';btn.id='oa-account-button';btn.className='oa-account-btn';btn.setAttribute('aria-haspopup','menu');btn.setAttribute('aria-expanded','false');btn.setAttribute('aria-controls','oa-account-menu');
@@ -1140,7 +1146,6 @@ const ACCOUNT_SCRIPT = `
     document.addEventListener('click',function(){menu.hidden=true;btn.setAttribute('aria-expanded','false');});
     slot.innerHTML='';slot.appendChild(btn);slot.appendChild(menu);syncOverflow();
   }
-  showLoading();
   // Defer the /api/me fetch so it doesn't compete with the iframe load for
   // network bandwidth. The account chip is above-the-fold but non-critical;
   // requestIdleCallback (or a 0ms timeout fallback) lets the browser finish
@@ -1220,7 +1225,7 @@ document.getElementById("oa-content").innerHTML=marked.parse(${jsonForInlineScri
 <head>
 <meta charset="utf-8">
 ${cspMeta}<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>${FRAME_RESET_CSS}${format === "markdown" ? MARKDOWN_CSS : ""}${FRAME_SHELL_CSS}${FRAME_ANCHOR_CSS}${FRAME_TEXT_CSS}</style>
+<style>${FRAME_RESET_CSS}${format === "markdown" ? MARKDOWN_CSS : ""}${FRAME_SHELL_CSS}${FRAME_CANVAS_CSS}${FRAME_ANCHOR_CSS}${FRAME_TEXT_CSS}</style>
 </head>
 <body>
 ${body}
@@ -2610,14 +2615,14 @@ const FRAME_BRIDGE_SCRIPT = `
       if(typeof window.__oaRenderMarkers==="function")window.__oaRenderMarkers(window.__oaComments);
     }
   });
-  // Mode is a runtime property of the artifact content (a canvas has a
-  // transformed .oa-plane), so the frame detects it and reports it: the host
+  // Mode is a runtime property of the artifact content (a canvas has an
+  // .oa-canvas/.oa-plane pair), so the frame detects it and reports it: the host
   // hides the drawer toggle on a canvas (comments live as pins at their point,
   // Figma-style) and keeps it on a document (comments list in the drawer,
   // Notion-style). The armed comment cursor is canvas-only — on a document the
-  // native text caret must stay so a selection can be made.
-  var pl=document.querySelector('.oa-plane');
-  window.__oaMode=(pl&&getComputedStyle(pl).transform!=='none')?'canvas':'text';
+  // native text caret must stay so a selection can be made. Reads the shared
+  // structural helper, never computed style: see FRAME_SHELL_SCRIPT.
+  window.__oaMode=typeof window.__oaIsCanvas==='function'&&window.__oaIsCanvas()?'canvas':'text';
   window.__oaOnArm=function(armed){root.classList.toggle('oa-cm-arming',!!armed&&window.__oaMode==='canvas')};
   send({type:"oa:ready",mode:window.__oaMode});
 })();
@@ -3193,16 +3198,35 @@ html.oa-cm-arming,html.oa-cm-arming *{cursor:url("data:image/svg+xml,%3Csvg xmln
 // window stays the scroll container — the handoff record/play shim drives
 // window.scrollTo — so authored position:sticky bars are re-pinned to the
 // sheet's inner top edge by FRAME_SHELL_SCRIPT instead. Canvas-mode artifacts
-// opt out: the frame detects the transformed .oa-plane before first paint (the
-// same signal the comments bridge uses) and stamps data-shell="flat",
-// restoring the full-bleed plane the canvas runtime owns.
+// opt out: the frame detects the .oa-plane/.oa-canvas pair before first paint
+// (the same signal the comments bridge uses) and stamps data-shell="flat",
+// restoring the full-bleed plane the canvas runtime owns. The flat rules also
+// carry a :has() twin, because canvas mode must never depend on script
+// timing — see FRAME_SHELL_SCRIPT.
 const FRAME_SHELL_CSS = `
 :root{--oa-shell-gap:.75rem;--oa-shell-radius:8px;--oa-shell-backdrop:color-mix(in oklab,var(--oa-surface),var(--oa-fg) 3%)}
 html{background:var(--oa-shell-backdrop)}
 body{margin:var(--oa-shell-gap);background:var(--oa-bg);border:1px solid var(--oa-border);border-radius:var(--oa-shell-radius);min-height:calc(100dvh - 2*var(--oa-shell-gap) - 2px)}
 html[data-shell="flat"]{background:var(--oa-bg)}
 html[data-shell="flat"] body{margin:0;border:0;border-radius:0;min-height:100dvh}
+html:has(.oa-canvas .oa-plane){background:var(--oa-bg)}
+html:has(.oa-canvas .oa-plane) body{margin:0;border:0;border-radius:0;min-height:100dvh}
 @media (max-width:52rem){body{margin:.5rem}html[data-shell="flat"] body{margin:0}}
+`;
+
+// Frame boundary ring, drawn on an overlay rather than as the body's own
+// inset box-shadow. The vendored canvas kit sanctions `padding: 0` for a
+// full-bleed frame (an edge-to-edge device screen), and a child that fills
+// the body paints over an inset shadow — the ring then vanished wherever the
+// child reached. The kit's inset is the body padding alone, so a full-bleed
+// child reaches every edge. A positioned ::after paints the boundary above
+// frame content at every zoom. It needs a positioning context on the body;
+// the body's box coincides with .oa-frame's, so absolutely positioned author
+// content keeps the same containing-block origin. The kit carries the same
+// overlay, so an artifact renders correctly outside the viewer as well.
+const FRAME_CANVAS_CSS = `
+.oa-frame-body{position:relative}
+.oa-frame-body::after{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1px var(--border,var(--oa-border));pointer-events:none}
 `;
 
 // Runs before first paint (synchronous, parser-inserted after the content):
@@ -3210,11 +3234,20 @@ html[data-shell="flat"] body{margin:0;border:0;border-radius:0;min-height:100dvh
 // the host LAYOUT_SCRIPT contract — only authored sticky bars pinned at 0/auto
 // move, an authored top value is respected. React content mounts after this
 // walk, matching the host script's one-shot behavior.
+//
+// Canvas detection is STRUCTURAL, never computed-style. A <style> in the body
+// can still be pending in the CSSOM when a parser-inserted script runs, so
+// `getComputedStyle(plane).transform` intermittently read 'none' and a canvas
+// artifact fell back to the sheet presentation: an inset, bordered page whose
+// 100dvh canvas then overflowed the frame, leaving a strip without the dot
+// lattice at the frame's top and edges. The class pair is the canvas kit's own
+// contract (.oa-canvas > .oa-plane), so it needs no style resolution. Every
+// canvas-aware frame script asks this one helper instead of re-testing.
 const FRAME_SHELL_SCRIPT = `
 (function(){
   var root=document.documentElement;
-  var plane=document.querySelector('.oa-plane');
-  if(plane&&getComputedStyle(plane).transform!=='none'){root.setAttribute('data-shell','flat');return}
+  window.__oaIsCanvas=function(){return !!document.querySelector('.oa-canvas .oa-plane')};
+  if(window.__oaIsCanvas()){root.setAttribute('data-shell','flat');return}
   var stack=[];
   for(var i=0;i<document.body.children.length;i++)stack.push(document.body.children[i]);
   while(stack.length){
@@ -3230,11 +3263,12 @@ const FRAME_SHELL_SCRIPT = `
 
 // Frame side, canvas mode: capture a click to drop a pin (world coords, read
 // once from the plane transform) and render existing point anchors as passive
-// plane children. No-op on non-canvas documents (text mode is separate).
+// plane children. No-op on non-canvas documents (text mode is separate) and
+// gated by the shared structural helper, never computed style.
 const FRAME_ANCHOR_SCRIPT = `
 (function(){
   var plane=document.querySelector('.oa-plane');
-  if(!plane||getComputedStyle(plane).transform==='none')return;
+  if(!plane||typeof window.__oaIsCanvas!=='function'||!window.__oaIsCanvas())return;
   // Origin must be the UNtransformed container (.oa-canvas). The plane's own
   // getBoundingClientRect already includes translate(tx,ty), so using it and
   // then subtracting m.e/m.f double-counts pan and drops pins off-click.
@@ -3302,7 +3336,7 @@ const FRAME_TEXT_CSS = `
 // opens compose. Armed mode still skips the chip and opens compose immediately.
 const FRAME_TEXT_SCRIPT = `
 (function(){
-  if(document.querySelector('.oa-plane'))return;
+  if(typeof window.__oaIsCanvas==='function'&&window.__oaIsCanvas())return;
   // esbuild's keepNames wraps named inner functions in __name(); that helper
   // lives in the worker bundle, not this sandboxed frame, so the injected
   // matcher sources below reference it. A passthrough shim makes them run here.
@@ -4205,10 +4239,10 @@ const STATUS_CSS = `
 .oa-status a:hover{text-decoration:underline;text-underline-offset:2px}
 .oa-status a:focus-visible{outline:none;box-shadow:var(--oa-focus-ring)}
 .oa-status-guidance{margin:.5rem 0 0;max-width:28rem;color:var(--oa-muted);font-size:.75rem;line-height:1.5}
-.oa-status-actions{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap;margin-top:1rem}
-.oa-status-copy{min-height:28px;padding:0 .75rem;border:1px solid var(--oa-border);border-radius:6px;background:var(--oa-surface);color:var(--oa-fg);font:inherit;font-size:.75rem;cursor:pointer;transition:border-color .15s,color .15s}
-.oa-status-copy:hover{border-color:var(--oa-accent);color:var(--oa-accent)}
-.oa-status-copy:focus-visible{outline:none;box-shadow:var(--oa-focus-ring)}
+.oa-status-actions{display:flex;align-items:center;justify-content:center;gap:.75rem;flex-wrap:wrap;margin-top:1rem}
+.oa-status-actions .oa-status-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:8rem;min-height:44px;padding:0 .875rem;border:1px solid var(--oa-border);border-radius:6px;background:var(--oa-surface);color:var(--oa-fg);font:inherit;font-size:.75rem;text-decoration:none;cursor:pointer;transition:border-color .15s,color .15s}
+.oa-status-actions .oa-status-btn:hover{border-color:var(--oa-accent);color:var(--oa-accent);text-decoration:none}
+.oa-status-actions .oa-status-btn:focus-visible{outline:none;box-shadow:var(--oa-focus-ring)}
 `;
 
 const DARK_CONSOLE_STATUS_CSS = `
@@ -4218,10 +4252,7 @@ const DARK_CONSOLE_STATUS_CSS = `
 .oa-status-branded .oa-mark{width:32px;height:32px;margin-bottom:1rem}
 .oa-status-branded .oa-status-brand{margin-bottom:.35rem;color:var(--oa-accent);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:9px;font-weight:500;letter-spacing:.12em;line-height:1.5;text-transform:uppercase}
 .oa-status-branded h1{font-family:var(--oa-font);font-size:1.25rem;font-weight:600;letter-spacing:-.02em}
-.oa-status-branded a{min-height:44px;display:inline-flex;align-items:center;margin-top:1.35rem;padding:0 .875rem;border:1px solid var(--oa-border);border-radius:6px;background:var(--oa-surface);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.75rem;color:var(--oa-fg)}
-.oa-status-branded a:hover{border-color:var(--oa-accent);color:var(--oa-accent);text-decoration:none}
-.oa-status-branded .oa-status-copy{border-color:var(--oa-border);background:var(--oa-surface);color:var(--oa-fg)}
-.oa-status-branded .oa-status-copy:hover{border-color:var(--oa-accent);color:var(--oa-accent)}
+.oa-status-branded .oa-status-actions .oa-status-btn{margin-top:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .oa-status-branded .oa-status-guidance{color:var(--oa-muted)}
 `;
 
@@ -4262,8 +4293,8 @@ ${branded ? `<p class="oa-status-brand">${escapeHtml(brand.wordmark)} / artifact
 <p>${options.body}</p>
 ${guidance}
 <div class="oa-status-actions">
-<a href="${escapeHtml(linkHref)}">${escapeHtml(linkText)}</a>
-<button type="button" class="oa-status-copy" id="oa-status-copy">Copy link</button>
+<a class="oa-status-btn" href="${escapeHtml(linkHref)}">${escapeHtml(linkText)}</a>
+<button type="button" class="oa-status-btn" id="oa-status-copy">Copy link</button>
 </div>
 </main>
 <script>(function(){var b=document.getElementById("oa-status-copy");if(!b)return;b.addEventListener("click",function(){var t=b.textContent;try{navigator.clipboard.writeText(location.href).then(function(){b.textContent="Copied";setTimeout(function(){b.textContent=t},2000)}).catch(function(){b.textContent="Copy failed";setTimeout(function(){b.textContent=t},2000)})}catch(e){b.textContent="Copy failed";setTimeout(function(){b.textContent=t},2000)}})})();</script>

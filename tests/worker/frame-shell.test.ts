@@ -59,10 +59,27 @@ describe("frameDocument — sheet presentation", () => {
       nonce: "n",
     });
     expect(doc).toContain('html[data-shell="flat"]');
-    // Same signal the comments bridge uses: a transformed .oa-plane.
-    expect(doc).toMatch(/querySelector\('\.oa-plane'\)/);
-    expect(doc).toMatch(/transform!=='none'/);
+    // Structural signal: the canvas kit's own class pair, resolved without the
+    // CSSOM. A body <style> can still be pending in the style engine when a
+    // parser-inserted script runs, so a computed-style test intermittently read
+    // transform 'none' and flipped a canvas artifact into the sheet
+    // presentation — an inset, bordered page whose 100dvh canvas overflowed the
+    // frame and lost its dot lattice at the edges.
+    expect(doc).toContain(
+      "window.__oaIsCanvas=function(){return !!document.querySelector('.oa-canvas .oa-plane')}",
+    );
     expect(doc).toMatch(/setAttribute\('data-shell','flat'\)/);
+    // The sheet presentation also carries a :has() twin, so flat rendering does
+    // not depend on the script running at all.
+    expect(doc).toContain("html:has(.oa-canvas .oa-plane) body{margin:0");
+    // Every canvas-aware frame script asks the one helper, and none gates on
+    // computed style any more.
+    expect(doc.match(/__oaIsCanvas\(\)/g)?.length ?? 0).toBeGreaterThanOrEqual(
+      4,
+    );
+    expect(doc).not.toMatch(
+      /getComputedStyle\([^()]*\)\.transform\s*[!=]==\s*['"]none['"]/,
+    );
   });
 
   it("re-pins authored sticky headers below the sheet inset", () => {
@@ -73,6 +90,39 @@ describe("frameDocument — sheet presentation", () => {
     });
     expect(doc).toMatch(/position==='sticky'/);
     expect(doc).toMatch(/style\.top='var\(--oa-shell-gap\)'/);
+  });
+
+  it("exposes no in-frame header height so author viewport math subtracts nothing", () => {
+    // The service header belongs to the host page and sits above the iframe,
+    // so a full-viewport canvas or hero inside the frame owns the whole frame.
+    // Leaking the host's header height here left a header-tall strip with no
+    // canvas dot lattice at the bottom of the frame.
+    const doc = frameDocument({
+      format: "html",
+      content: "<p>hi</p>",
+      nonce: "n",
+    });
+    expect(doc).toContain(":root{--oa-header-h:0px}");
+    expect(doc).not.toContain("--oa-header-h:calc(2.5rem + 1px)");
+    // The host page still measures its own header into the same variable.
+    expect(doc).not.toMatch(
+      /[id]\{scroll-margin-top:calc\(var\(--oa-header-h\)/,
+    );
+  });
+
+  it("paints the canvas frame ring above frame content", () => {
+    // A full-bleed frame (padding: 0) sets a child flush to the body, and a
+    // child paints over the body's own inset box-shadow — the boundary ring
+    // then survived on the left and right only.
+    const doc = frameDocument({
+      format: "html",
+      content: "<p>hi</p>",
+      nonce: "n",
+    });
+    expect(doc).toContain(".oa-frame-body{position:relative}");
+    expect(doc).toMatch(
+      /\.oa-frame-body::after\{content:"";position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 1px var\(--border,var\(--oa-border\)\);pointer-events:none\}/,
+    );
   });
 
   it("flows through the encrypted unlock template", () => {

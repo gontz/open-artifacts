@@ -33,7 +33,16 @@ Feature: View an artifact
     Given a published canvas artifact whose plane carries a transform
     When I GET /a/:id/frame
     Then the frame detects the canvas mode before first paint
+    And the flat opt-out is decided structurally, not by resolved style
+    And the sheet presentation carries a style-only opt-out for the same class pair
     And the sheet inset is removed so the plane owns the full frame viewport
+    And the frame exposes no header height, so the canvas and its dot lattice cover every edge
+
+  Scenario: A full-bleed canvas frame keeps its boundary ring
+    Given a published canvas artifact whose frame body sits flush with a full-bleed child
+    When I GET /a/:id/frame
+    Then the frame body boundary ring paints on an overlay above frame content
+    So the top and bottom edges of the frame stay visible at every zoom
 
   Scenario: Authored sticky headers pin inside the sheet edge
     Given a published HTML artifact whose own CSS pins a sticky header at the viewport top
@@ -59,6 +68,12 @@ Feature: View an artifact
     And comments and theme remain directly available
     And the remaining artifact controls are available from a More panel
     And a secondary dock returns focus to the visible More trigger when closed
+
+  Scenario: Account loading does not flash in the service header
+    Given the hosted viewer resolves account details asynchronously
+    When I GET /a/:id
+    Then the account slot stays empty until the account response is ready
+    And the header does not render a temporary loading spinner
 
   Scenario: Unknown artifact id
     When I GET /a/doesnotexist
